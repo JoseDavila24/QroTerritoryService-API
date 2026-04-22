@@ -1,0 +1,41 @@
+services:
+  # Contenedor de Base de Datos
+  db:
+    image: mysql:8.0
+    container_name: qro-territory-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: qro_territory_db
+      MYSQL_USER: user_qro
+      MYSQL_PASSWORD: pass_qro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Contenedor de Desarrollo (Quarkus Dev Mode)
+  dev-app:
+    image: maven:3.9.6-eclipse-temurin-21
+    container_name: qro-territory-dev
+    volumes:
+      - .:/project            # Monta tu código fuente
+      - maven-repo:/root/.m2  # Caché de dependencias (para que no descargue todo cada vez)
+    working_dir: /project
+    environment:
+      # Configuración para que Quarkus se conecte a la DB dentro de la red de Docker
+      - QUARKUS_DATASOURCE_JDBC_URL=jdbc:mysql://db:3306/qro_territory_db
+      - QUARKUS_DATASOURCE_USERNAME=user_qro
+      - QUARKUS_DATASOURCE_PASSWORD=pass_qro
+    ports:
+      - "8080:8080"           # Puerto de la API
+      - "5005:5005"           # Puerto para Debugging remoto
+    command: mvn quarkus:dev -Dquarkus.http.host=0.0.0.0 # Importante: 0.0.0.0 para acceso externo
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  maven-repo: # Volumen para persistir las librerías de Maven
