@@ -1,0 +1,769 @@
+openapi: 3.0.4 # Versión de OpenAPI que usaremos
+
+# ══════════════════════════════════════════════════════════════
+# INFO
+# ══════════════════════════════════════════════════════════════
+info:
+  title: QroTerritoryService API
+  version: "1.1.0"
+  description: |
+    ## Sistema de Normalización Geográfica y Administrativa — Municipio de Querétaro
+
+    API REST que actúa como **Traductor Oficial** entre Códigos Postales, Colonias y
+    Delegaciones Municipales de Querétaro. Resuelve el vacío de datos entre SEPOMEX
+    y la división política local, habilitando selectores desplegables inteligentes
+    (Delegación → Colonia) en cualquier aplicación web o móvil.
+
+    ---
+
+    ### Secciones de la API
+
+    | Sección | Autenticación | SLA de respuesta |
+    |---|---|---|
+    | **Public API** | Sin autenticación | < 50 ms (< 5 ms si caché activo) |
+    | **Admin API** | Header `X-API-KEY` | Sin restricción de latencia |
+
+    ---
+
+    ### Convenciones generales
+    - Todas las respuestas son `application/json`.
+    - Nomenclatura de campos: **snake_case** en request y response bodies.
+    - Paginación: base 0 (estándar de Quarkus/Panache).
+    - Fechas y timestamps: ISO-8601 UTC.
+    - Trazabilidad: incluir el header `X-Request-Id` en cada petición para correlación de logs.
+
+    ---
+
+    ### Estrategia de Caché (Caffeine — TTL 10 min)
+    - `GET /colonias` almacena resultados en RAM por delegación + página + tamaño.
+    - `POST` y `PUT` admin invalidan automáticamente el caché de la(s) delegación(es) afectada(s).
+    - El microservicio es **stateless**; escala horizontalmente sin cambios de código.
+
+  contact:
+    name: TecNM Campus Querétaro Centro — Equipo de Arquitectura de Software
+    url: https://qroterritory.tecnm-qro.lat
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+externalDocs:
+  description: Documentación interactiva (Swagger UI)
+  url: https://qroterritory.tecnm-qro.lat/q/swagger-ui
+
+# ══════════════════════════════════════════════════════════════
+# SERVERS
+# ══════════════════════════════════════════════════════════════
+servers:
+  - url: https://qroterritory.tecnm-qro.lat/api/v1
+    description: Producción (Académico-Comunitario)
+  - url: http://localhost:8080/api/v1
+    description: Desarrollo local
+
+# ══════════════════════════════════════════════════════════════
+# TAGS
+# ══════════════════════════════════════════════════════════════
+tags:
+  - name: Delegaciones
+    description: |
+      Consulta del catálogo de delegaciones municipales.
+      **Sin autenticación.** SLA < 50 ms (< 5 ms con caché).
+  - name: Colonias
+    description: |
+      Consulta de asentamientos humanos filtrados por delegación, con paginación.
+      **Sin autenticación.** Respuestas servidas desde caché Caffeine.
+  - name: Admin — Colonias
+    description: |
+      Mantenimiento del catálogo geográfico vivo.
+      **Requiere `X-API-KEY` en cada petición.**
+      Cada mutación invalida el caché de la(s) delegación(es) afectada(s).
+
+# ══════════════════════════════════════════════════════════════
+# COMPONENTS
+# ══════════════════════════════════════════════════════════════
+components:
+
+  # ── Security ──────────────────────────────────────────────
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+      description: |
+        Clave secreta requerida para todas las rutas `/admin/*`.
+        Se configura como variable de entorno en el servidor Quarkus.
+
+  # ── Schemas ───────────────────────────────────────────────
+  schemas:
+
+    TipoAsentamiento:
+      type: string
+      description: Clasificación oficial INEGI del tipo de asentamiento humano.
+      enum:
+        - FRACCIONAMIENTO
+        - BARRIO
+        - COLONIA
+        - CONDOMINIO
+        - UNIDAD_HABITACIONAL
+        - PUEBLO
+        - EJIDO
+        - ZONA_INDUSTRIAL
+        - RANCHERIA
+      example: FRACCIONAMIENTO
+
+    Delegacion:
+      type: object
+      description: Unidad político-administrativa del Municipio de Querétaro.
+      required:
+        - id
+        - nombre
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Identificador único (PK).
+          example: 1
+          readOnly: true
+        nombre:
+          type: string
+          description: Nombre oficial de la delegación.
+          minLength: 2
+          maxLength: 120
+          example: "Santa Rosa Jáuregui"
+        sede:
+          type: string
+          description: Dirección física de la oficina delegacional.
+          maxLength: 255
+          example: "Agapito Pozo s/n, esquina Independencia, Col. Centro, CP 76220"
+          nullable: true
+
+    Colonia:
+      type: object
+      description: Asentamiento humano perteneciente a una delegación municipal.
+      required:
+        - id
+        - nombre
+        - codigo_postal
+        - tipo_asentamiento
+        - delegacion_id
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Identificador único (PK).
+          example: 1023
+          readOnly: true
+        nombre:
+          type: string
+          description: Nombre oficial del asentamiento.
+          minLength: 2
+          maxLength: 150
+          example: "La Cruz"
+        codigo_postal:
+          type: string
+          description: Código Postal federal de 5 dígitos (SEPOMEX).
+          pattern: '^\d{5}$'
+          minLength: 5
+          maxLength: 5
+          example: "76021"
+        tipo_asentamiento:
+          $ref: '#/components/schemas/TipoAsentamiento'
+        delegacion_id:
+          type: integer
+          format: int64
+          description: FK — ID de la delegación a la que pertenece el asentamiento.
+          example: 2
+
+    ColoniaInput:
+      type: object
+      description: |
+        Payload para crear o reemplazar una colonia.
+        Todos los campos son obligatorios en `POST` y `PUT`.
+        Nomenclatura snake_case consistente con el modelo de respuesta.
+      required:
+        - nombre
+        - codigo_postal
+        - tipo_asentamiento
+        - delegacion_id
+      properties:
+        nombre:
+          type: string
+          description: Nombre oficial del asentamiento.
+          minLength: 2
+          maxLength: 150
+          example: "La Cruz"
+        codigo_postal:
+          type: string
+          description: Código Postal federal de 5 dígitos (SEPOMEX).
+          pattern: '^\d{5}$'
+          minLength: 5
+          maxLength: 5
+          example: "76021"
+        tipo_asentamiento:
+          $ref: '#/components/schemas/TipoAsentamiento'
+        delegacion_id:
+          type: integer
+          format: int64
+          description: ID de la delegación destino.
+          example: 2
+
+    PageResponseColonias:
+      type: object
+      description: Envelope de paginación para listados de colonias.
+      required:
+        - content
+        - page
+        - size
+        - total_elements
+        - total_pages
+      properties:
+        content:
+          type: array
+          description: Colonias de la página actual.
+          items:
+            $ref: '#/components/schemas/Colonia'
+        page:
+          type: integer
+          description: Página actual (base 0).
+          minimum: 0
+          example: 0
+        size:
+          type: integer
+          description: Elementos por página solicitados.
+          minimum: 1
+          maximum: 250
+          example: 100
+        total_elements:
+          type: integer
+          format: int64
+          description: Total de colonias que coinciden con el filtro.
+          example: 145
+        total_pages:
+          type: integer
+          description: Total de páginas disponibles.
+          example: 2
+
+    ErrorResponse:
+      type: object
+      description: Estructura de error unificada para todos los endpoints.
+      required:
+        - status
+        - error
+        - message
+        - timestamp
+        - path
+      properties:
+        status:
+          type: integer
+          description: Código HTTP del error.
+          example: 400
+        error:
+          type: string
+          description: Nombre canónico del error HTTP.
+          example: "Bad Request"
+        message:
+          type: string
+          description: Descripción legible y accionable del error.
+          example: "El campo 'codigo_postal' debe contener exactamente 5 dígitos numéricos."
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento exacto del error (ISO-8601 UTC).
+          example: "2026-04-16T15:30:00Z"
+        path:
+          type: string
+          description: Ruta de la petición que originó el error.
+          example: "/api/v1/admin/colonias"
+
+  # ── Parameters ────────────────────────────────────────────
+  parameters:
+
+    delegacion_id_query:
+      name: delegacion_id
+      in: query
+      required: true
+      description: ID de la delegación cuyos asentamientos se desean consultar.
+      schema:
+        type: integer
+        format: int64
+        example: 2
+
+    pageQuery:
+      name: page
+      in: query
+      required: false
+      description: Número de página a recuperar (base 0).
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+        example: 0
+
+    sizeQuery:
+      name: size
+      in: query
+      required: false
+      description: Cantidad de elementos por página. Máximo 250.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 250
+        default: 100
+        example: 100
+
+    coloniaIdPath:
+      name: id
+      in: path
+      required: true
+      description: Identificador único (PK) de la colonia.
+      schema:
+        type: integer
+        format: int64
+        example: 503
+
+  # ── Headers reutilizables ─────────────────────────────────
+  headers:
+    X-Request-Id:
+      description: |
+        UUID de correlación generado por el servidor para trazabilidad en logs.
+        Si el cliente envía este header en la petición, el servidor lo propaga intacto.
+      schema:
+        type: string
+        format: uuid
+        example: "550e8400-e29b-41d4-a716-446655440000"
+    X-Response-Time:
+      description: Tiempo de procesamiento en el servidor (milisegundos).
+      schema:
+        type: string
+        example: "4ms"
+    X-Cache:
+      description: Origen de la respuesta respecto al caché Caffeine.
+      schema:
+        type: string
+        enum: [HIT, MISS]
+        example: HIT
+
+  # ── Responses reutilizables ───────────────────────────────
+  responses:
+
+    400BadRequest:
+      description: Petición inválida — parámetros faltantes o con formato incorrecto.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 400
+            error: "Bad Request"
+            message: "El campo 'codigo_postal' debe contener exactamente 5 dígitos numéricos."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/admin/colonias"
+
+    401Unauthorized:
+      description: Header `X-API-KEY` ausente o con valor inválido.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 401
+            error: "Unauthorized"
+            message: "API Key inválida o no proporcionada en el header X-API-KEY."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/admin/colonias"
+
+    404NotFound:
+      description: El recurso solicitado no existe.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 404
+            error: "Not Found"
+            message: "Colonia con id 9999 no encontrada."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/admin/colonias/9999"
+
+    409Conflict:
+      description: |
+        Conflicto — ya existe una colonia con el mismo nombre en la misma delegación.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 409
+            error: "Conflict"
+            message: "Ya existe una colonia con el nombre 'San José Inn' en la delegación 2."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/admin/colonias"
+
+    422UnprocessableEntity:
+      description: La entidad no pudo procesarse por fallar las reglas de negocio.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 422
+            error: "Unprocessable Entity"
+            message: "La delegación con id 99 no existe en el catálogo."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/admin/colonias"
+
+    429TooManyRequests:
+      description: |
+        Límite de peticiones superado. Reintentar tras el tiempo
+        indicado en el header `Retry-After`.
+      headers:
+        Retry-After:
+          description: Segundos que el cliente debe esperar antes de reintentar.
+          schema:
+            type: integer
+            example: 30
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 429
+            error: "Too Many Requests"
+            message: "Límite de peticiones alcanzado. Reintente en 30 segundos."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/colonias"
+
+    500InternalError:
+      description: Error inesperado en el servidor.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/X-Request-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: 500
+            error: "Internal Server Error"
+            message: "Error de conectividad con la base de datos. Contacte al administrador."
+            timestamp: "2026-04-16T15:30:00Z"
+            path: "/api/v1/delegaciones"
+
+# ══════════════════════════════════════════════════════════════
+# PATHS
+# ══════════════════════════════════════════════════════════════
+paths:
+
+  # ── Public API — Delegaciones ──────────────────────────────
+  /delegaciones:
+    get:
+      operationId: getDelegaciones
+      summary: Listar todas las delegaciones
+      description: |
+        Devuelve el catálogo completo de las 7 delegaciones del Municipio de Querétaro.
+        Diseñado para poblar el primer `<select>` de cualquier formulario de dirección.
+
+        **SLA:** < 5 ms (respuesta directa desde caché Caffeine).
+        **Sin autenticación.**
+      tags:
+        - Delegaciones
+      responses:
+        '200':
+          description: Catálogo completo de delegaciones municipales.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=600"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Delegacion'
+              example:
+                - id: 1
+                  nombre: "Santa Rosa Jáuregui"
+                  sede: "Agapito Pozo s/n, esquina Independencia, Col. Centro, CP 76220"
+                - id: 2
+                  nombre: "Centro Histórico"
+                  sede: "Calle Madero 81 Pte., esquina Calle Guerrero, CP 76000"
+                - id: 3
+                  nombre: "Villa Cayetano Rubio"
+                  sede: "Avenida del Río núm. 1, Col. Hércules, CP 76209"
+                - id: 4
+                  nombre: "Josefa Vergara"
+                  sede: "Calle 21 núm. 1000, entre Av. 24 y Av. 26, Col. Lomas de Casa Blanca, CP 76086"
+                - id: 5
+                  nombre: "Félix Osores Sotomayor"
+                  sede: "Avenida de la Luz núm. 602, Col. Cerrito Colorado"
+                - id: 6
+                  nombre: "Felipe Carrillo Puerto"
+                  sede: "Calzada Guadalupe núm. 103, Col. Carrillo Puerto, CP 76138"
+                - id: 7
+                  nombre: "Epigmenio González"
+                  sede: "Calle Tláloc núm. 100, Col. Desarrollo San Pablo, CP 76130"
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalError'
+
+  # ── Public API — Colonias ──────────────────────────────────
+  /colonias:
+    get:
+      operationId: getColoniasByDelegacion
+      summary: Listar colonias de una delegación (paginado)
+      description: |
+        **Endpoint crítico.** Filtra los asentamientos humanos de una delegación con
+        paginación. Soporta delegaciones de alta densidad (ej. Félix Osores, +300 colonias).
+
+        ### Flujo de caché
+        1. Clave de caché: `delegacion_id + page + size`.
+        2. **HIT** → respuesta directa en < 5 ms sin tocar MySQL.
+        3. **MISS** → consulta MySQL, almacena resultado 10 min, devuelve datos frescos.
+        4. `POST` / `PUT` admin sobre esa delegación → invalida todas sus páginas en caché.
+
+        **Sin autenticación.**
+      tags:
+        - Colonias
+      parameters:
+        - $ref: '#/components/parameters/delegacion_id_query'
+        - $ref: '#/components/parameters/pageQuery'
+        - $ref: '#/components/parameters/sizeQuery'
+      responses:
+        '200':
+          description: Página de colonias pertenecientes a la delegación solicitada.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Cache:
+              $ref: '#/components/headers/X-Cache'
+            Cache-Control:
+              schema:
+                type: string
+                example: "public, max-age=600"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageResponseColonias'
+              example:
+                content:
+                  - id: 500
+                    nombre: "Centro"
+                    codigo_postal: "76021"
+                    tipo_asentamiento: "COLONIA"
+                    delegacion_id: 2
+                  - id: 501
+                    nombre: "San José Inn"
+                    codigo_postal: "76021"
+                    tipo_asentamiento: "COLONIA"
+                    delegacion_id: 2
+                  - id: 502
+                    nombre: "La Cruz"
+                    codigo_postal: "76021"
+                    tipo_asentamiento: "FRACCIONAMIENTO"
+                    delegacion_id: 2
+                page: 0
+                size: 100
+                total_elements: 145
+                total_pages: 2
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalError'
+
+  /colonias/{id}:
+    get:
+      operationId: getColoniaById
+      summary: Obtener una colonia por ID
+      description: |
+        Devuelve el detalle completo de un asentamiento a partir de su
+        identificador único. Útil para precargar datos en formularios o
+        validar una dirección guardada.
+
+        **Sin autenticación.**
+      tags:
+        - Colonias
+      parameters:
+        - $ref: '#/components/parameters/coloniaIdPath'
+      responses:
+        '200':
+          description: Detalle de la colonia solicitada.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+            X-Response-Time:
+              $ref: '#/components/headers/X-Response-Time'
+            X-Cache:
+              $ref: '#/components/headers/X-Cache'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Colonia'
+              example:
+                id: 1023
+                nombre: "La Cruz"
+                codigo_postal: "76021"
+                tipo_asentamiento: "FRACCIONAMIENTO"
+                delegacion_id: 2
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '429':
+          $ref: '#/components/responses/429TooManyRequests'
+        '500':
+          $ref: '#/components/responses/500InternalError'
+
+  # ── Admin API — Colonias ───────────────────────────────────
+  /admin/colonias:
+    post:
+      operationId: createColonia
+      summary: Registrar un nuevo asentamiento
+      description: |
+        Agrega una nueva colonia, barrio, fraccionamiento u otro asentamiento al catálogo
+        **sin necesidad de reiniciar el sistema**.
+
+        ### Lógica de negocio interna
+        1. **Validar delegación:** ¿Existe `delegacion_id`? Si no → `422`.
+        2. **Validar CP:** ¿`codigo_postal` tiene 5 dígitos? Si no → `400`.
+        3. **Verificar unicidad:** ¿Mismo nombre en la misma delegación? Si sí → `409`.
+        4. **Persistir** el nuevo registro en MySQL 8.0.
+        5. **Invalidar caché** de todas las páginas de la delegación destino.
+        6. Retornar `201 Created` con el recurso creado y el header `Location`.
+
+        **Requiere `X-API-KEY`.**
+      tags:
+        - Admin — Colonias
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        description: Datos del nuevo asentamiento a registrar.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ColoniaInput'
+            example:
+              nombre: "San José Inn"
+              codigo_postal: "76021"
+              tipo_asentamiento: "COLONIA"
+              delegacion_id: 2
+      responses:
+        '201':
+          description: Asentamiento creado. Caché de la delegación invalidado.
+          headers:
+            Location:
+              description: URI del recurso recién creado.
+              schema:
+                type: string
+                example: "/api/v1/colonias/1024"
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Colonia'
+              example:
+                id: 1024
+                nombre: "San José Inn"
+                codigo_postal: "76021"
+                tipo_asentamiento: "COLONIA"
+                delegacion_id: 2
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '409':
+          $ref: '#/components/responses/409Conflict'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/500InternalError'
+
+  /admin/colonias/{id}:
+    put:
+      operationId: updateColonia
+      summary: Corregir o reasignar una colonia existente
+      description: |
+        Reemplaza completamente los datos de un asentamiento existente.
+        Caso de uso principal: mover una colonia a la delegación correcta
+        cuando fue registrada erróneamente.
+
+        ### Lógica de negocio interna
+        1. **Buscar colonia:** ¿Existe `id`? Si no → `404`.
+        2. **Validar delegación destino:** ¿Existe `delegacion_id`? Si no → `422`.
+        3. **Validar CP:** ¿Formato correcto? Si no → `400`.
+        4. **Registrar en LOG:** `INFO: Colonia {id} movida de Delegación {anterior} a {nueva}.`
+        5. **Actualizar** el registro en MySQL 8.0.
+        6. **Invalidar caché** de **ambas** delegaciones afectadas (anterior y nueva).
+        7. Retornar `200 OK` con el recurso actualizado.
+
+        **Requiere `X-API-KEY`.**
+      tags:
+        - Admin — Colonias
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/coloniaIdPath'
+      requestBody:
+        required: true
+        description: Datos completos del asentamiento (reemplazo total).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ColoniaInput'
+            example:
+              nombre: "La Cruz"
+              codigo_postal: "76021"
+              tipo_asentamiento: "FRACCIONAMIENTO"
+              delegacion_id: 2
+      responses:
+        '200':
+          description: |
+            Asentamiento actualizado. Caché de la(s) delegación(es) afectada(s) invalidado.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/X-Request-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Colonia'
+              example:
+                id: 503
+                nombre: "La Cruz"
+                codigo_postal: "76021"
+                tipo_asentamiento: "FRACCIONAMIENTO"
+                delegacion_id: 2
+        '400':
+          $ref: '#/components/responses/400BadRequest'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '404':
+          $ref: '#/components/responses/404NotFound'
+        '422':
+          $ref: '#/components/responses/422UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/500InternalError'
