@@ -9,10 +9,10 @@
 INSERT INTO delegaciones (id, nombre, sede) VALUES (1, 'Santa Rosa Jáuregui', 'Agapito Pozo s/n, esquina Independencia, Col. Centro, CP 76220');
 INSERT INTO delegaciones (id, nombre, sede) VALUES (2, 'Centro Histórico', 'Calle Madero 81 Pte., esquina Calle Guerrero, CP 76000');
 INSERT INTO delegaciones (id, nombre, sede) VALUES (3, 'Villa Cayetano Rubio', 'Avenida del Río núm. 1, Col. Hércules, CP 76209');
-INSERT INTO delegaciones (id, nombre, sede) VALUES (4, 'Villa Cayetano Rubio', 'Avenida del Río núm. 1, Col. Hércules, CP 76209');
-INSERT INTO delegaciones (id, nombre, sede) VALUES (5, 'Villa Cayetano Rubio', 'Avenida del Río núm. 1, Col. Hércules, CP 76209');
-INSERT INTO delegaciones (id, nombre, sede) VALUES (6, 'Villa Cayetano Rubio', 'Avenida del Río núm. 1, Col. Hércules, CP 76209');
-INSERT INTO delegaciones (id, nombre, sede) VALUES (7, 'Villa Cayetano Rubio', 'Avenida del Río núm. 1, Col. Hércules, CP 76209');
+INSERT INTO delegaciones (id, nombre, sede) VALUES (4, 'Josefa Vergara', 'Calle 21 núm. 1000, entre Av. 24 y Av. 26, Col. Lomas de Casa Blanca, CP 76086');
+INSERT INTO delegaciones (id, nombre, sede) VALUES (5, 'Félix Osores Sotomayor', 'Avenida de la Luz núm. 602, Col. Cerrito Colorado');
+INSERT INTO delegaciones (id, nombre, sede) VALUES (6, 'Felipe Carrillo Puerto', 'Calzada Guadalupe núm. 103, Col. Carrillo Puerto, CP 76138');
+INSERT INTO delegaciones (id, nombre, sede) VALUES (7, 'Epigmenio González', 'Calle Tláloc núm. 100, Col. Desarrollo San Pablo, CP 76130');
 
 -- Colonias (id omitido: AUTO_INCREMENT lo asigna MySQL)
 INSERT INTO colonias (nombre, codigoPostal, tipo_asentamiento, delegacion_id) VALUES ('Centro', '76000', 'COLONIA', 2);
