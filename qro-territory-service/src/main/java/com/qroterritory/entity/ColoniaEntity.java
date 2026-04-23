@@ -8,12 +8,15 @@ import jakarta.persistence.*;
 public class ColoniaEntity extends PanacheEntityBase {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY) // <--- ¡Esta es la línea mágica que faltaba!
     public Long id;
 
     public String nombre;
     public String codigoPostal;
 
-    // Aquí ocurre la magia de la relación relacional
+    @Column(name = "tipo_asentamiento")
+    public String tipoAsentamiento;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "delegacion_id")
     public DelegacionEntity delegacion;
