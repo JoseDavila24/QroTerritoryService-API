@@ -122,7 +122,6 @@ components:
           format: int64
           description: Identificador único (PK).
           example: 1
-          readOnly: true
         nombre:
           type: string
           description: Nombre oficial de la delegación.
@@ -151,7 +150,6 @@ components:
           format: int64
           description: Identificador único (PK).
           example: 1023
-          readOnly: true
         nombre:
           type: string
           description: Nombre oficial del asentamiento.
