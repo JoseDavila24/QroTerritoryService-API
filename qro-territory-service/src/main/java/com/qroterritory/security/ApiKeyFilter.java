@@ -2,11 +2,15 @@ package com.qroterritory.security;
 
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
-import jakarta.ws.rs.ext.Provider;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.ext.Provider;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.openapi.quarkus.openapi_yaml.model.ErrorResponse;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Provider
 public class ApiKeyFilter implements ContainerRequestFilter {
@@ -16,29 +20,30 @@ public class ApiKeyFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) throws IOException {
-        // Usamos la URL absoluta completa para que no haya dudas (ej. http://localhost:8080/api/v1/admin/colonias/5)
         String urlCompleta = requestContext.getUriInfo().getAbsolutePath().toString();
 
-        // Imprimimos en la terminal lo que el filtro está viendo
-        System.out.println("🕵️ Filtro de seguridad revisando la URL: " + urlCompleta);
+        if (!urlCompleta.contains("admin")) {
+            return;
+        }
 
-        // Si la URL contiene "admin" en cualquier parte, activamos las defensas
-        if (urlCompleta.contains("admin")) {
+        String headerKey = requestContext.getHeaderString("X-API-KEY");
 
-            String headerKey = requestContext.getHeaderString("X-API-KEY");
-            System.out.println("🔑 Llave recibida en el Header: " + headerKey);
+        if (headerKey == null || !headerKey.equals(apiKey)) {
+            String path = requestContext.getUriInfo().getAbsolutePath().getPath();
 
-            if (headerKey == null || !headerKey.equals(apiKey)) {
-                System.out.println("🚫 ACCESO DENEGADO");
-                requestContext.abortWith(
-                        Response.status(Response.Status.UNAUTHORIZED)
-                                .entity("{\"error\": \"Acceso denegado. X-API-KEY inválida o ausente.\"}")
-                                .header("Content-Type", "application/json")
-                                .build()
-                );
-            } else {
-                System.out.println("✅ ACCESO PERMITIDO");
-            }
+            ErrorResponse er = new ErrorResponse();
+            er.setStatus(401);
+            er.setError("Unauthorized");
+            er.setMessage("API Key inválida o no proporcionada en el header X-API-KEY.");
+            er.setTimestamp(OffsetDateTime.now(ZoneOffset.UTC));
+            er.setPath(path);
+
+            requestContext.abortWith(
+                Response.status(Response.Status.UNAUTHORIZED)
+                    .entity(er)
+                    .type(MediaType.APPLICATION_JSON)
+                    .build()
+            );
         }
     }
 }
