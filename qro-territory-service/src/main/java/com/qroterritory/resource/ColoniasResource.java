@@ -8,7 +8,6 @@ import jakarta.ws.rs.NotFoundException;
 import org.openapi.quarkus.openapi_yaml.api.ColoniasApi;
 import org.openapi.quarkus.openapi_yaml.model.Colonia;
 import org.openapi.quarkus.openapi_yaml.model.PageResponseColonias;
-import org.openapi.quarkus.openapi_yaml.model.TipoAsentamiento;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -26,7 +25,7 @@ public class ColoniasResource implements ColoniasApi {
         if (entidad == null) {
             throw new NotFoundException("Colonia con id " + id + " no encontrada.");
         }
-        return mapearAColonia(entidad);
+        return ColoniaMapper.toDto(entidad);
     }
 
     @Override
@@ -40,7 +39,7 @@ public class ColoniasResource implements ColoniasApi {
         var query = ColoniaEntity.find("delegacion.id", delegacionId).page(numPage, pageSize);
         List<ColoniaEntity> entidades = query.list();
         List<Colonia> listaColonias = entidades.stream()
-                .map(this::mapearAColonia)
+                .map(ColoniaMapper::toDto)
                 .collect(Collectors.toList());
 
         PageResponseColonias respuesta = new PageResponseColonias();
@@ -53,24 +52,4 @@ public class ColoniasResource implements ColoniasApi {
         return respuesta;
     }
 
-    private Colonia mapearAColonia(ColoniaEntity entidad) {
-        Colonia dto = new Colonia();
-        dto.setId(entidad.id);
-        dto.setNombre(entidad.nombre);
-        dto.setCodigoPostal(entidad.codigoPostal);
-
-        if (entidad.tipoAsentamiento != null) {
-            try {
-                dto.setTipoAsentamiento(TipoAsentamiento.valueOf(entidad.tipoAsentamiento));
-            } catch (IllegalArgumentException e) {
-                dto.setTipoAsentamiento(null);
-            }
-        }
-
-        if (entidad.delegacion != null) {
-            dto.setDelegacionId(entidad.delegacion.id);
-        }
-
-        return dto;
-    }
 }

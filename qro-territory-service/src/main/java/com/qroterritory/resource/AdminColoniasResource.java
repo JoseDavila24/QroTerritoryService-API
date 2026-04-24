@@ -11,10 +11,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
-import org.openapi.quarkus.openapi_yaml.model.Colonia;
 import org.openapi.quarkus.openapi_yaml.model.ColoniaInput;
 import org.openapi.quarkus.openapi_yaml.model.ErrorResponse;
-import org.openapi.quarkus.openapi_yaml.model.TipoAsentamiento;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
@@ -32,6 +30,12 @@ public class AdminColoniasResource {
     @CacheInvalidateAll(cacheName = "colonias-por-delegacion")
     public Response createColonia(@Valid ColoniaInput input, @Context UriInfo uriInfo) {
         String path = uriInfo.getAbsolutePath().getPath();
+
+        // Validate codigo_postal format → 400
+        if (input.getCodigoPostal() == null || !input.getCodigoPostal().matches("^\\d{5}$")) {
+            return errorResponse(400, "Bad Request",
+                "El campo 'codigo_postal' debe contener exactamente 5 dígitos numéricos.", path);
+        }
 
         // Validate delegation exists → 422
         DelegacionEntity delegacion = DelegacionEntity.findById(input.getDelegacionId().longValue());
@@ -60,7 +64,7 @@ public class AdminColoniasResource {
             .resolveTemplate("id", nueva.id)
             .build();
 
-        return Response.created(location).entity(mapearAColonia(nueva)).build();
+        return Response.created(location).entity(ColoniaMapper.toDto(nueva)).build();
     }
 
     @PUT
@@ -69,6 +73,12 @@ public class AdminColoniasResource {
     @CacheInvalidateAll(cacheName = "colonias-por-delegacion")
     public Response updateColonia(@PathParam("id") Long id, @Valid ColoniaInput input, @Context UriInfo uriInfo) {
         String path = uriInfo.getAbsolutePath().getPath();
+
+        // Validate codigo_postal format → 400
+        if (input.getCodigoPostal() == null || !input.getCodigoPostal().matches("^\\d{5}$")) {
+            return errorResponse(400, "Bad Request",
+                "El campo 'codigo_postal' debe contener exactamente 5 dígitos numéricos.", path);
+        }
 
         ColoniaEntity colonia = ColoniaEntity.findById(id);
         if (colonia == null) {
@@ -102,7 +112,7 @@ public class AdminColoniasResource {
         colonia.tipoAsentamiento = input.getTipoAsentamiento() != null ? input.getTipoAsentamiento().name() : null;
         colonia.delegacion = delegacion;
 
-        return Response.ok(mapearAColonia(colonia)).build();
+        return Response.ok(ColoniaMapper.toDto(colonia)).build();
     }
 
     private Response errorResponse(int status, String error, String message, String path) {
@@ -113,23 +123,5 @@ public class AdminColoniasResource {
         er.setTimestamp(OffsetDateTime.now(ZoneOffset.UTC));
         er.setPath(path);
         return Response.status(status).entity(er).type(MediaType.APPLICATION_JSON).build();
-    }
-
-    private Colonia mapearAColonia(ColoniaEntity entidad) {
-        Colonia dto = new Colonia();
-        dto.setId(entidad.id);
-        dto.setNombre(entidad.nombre);
-        dto.setCodigoPostal(entidad.codigoPostal);
-        if (entidad.tipoAsentamiento != null) {
-            try {
-                dto.setTipoAsentamiento(TipoAsentamiento.valueOf(entidad.tipoAsentamiento));
-            } catch (IllegalArgumentException e) {
-                dto.setTipoAsentamiento(null);
-            }
-        }
-        if (entidad.delegacion != null) {
-            dto.setDelegacionId(entidad.delegacion.id);
-        }
-        return dto;
     }
 }
