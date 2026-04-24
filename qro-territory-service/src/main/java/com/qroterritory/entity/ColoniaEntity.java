@@ -8,7 +8,7 @@ import jakarta.persistence.*;
 public class ColoniaEntity extends PanacheEntityBase {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY) // <--- ¡Esta es la línea mágica que faltaba!
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     public Long id;
 
     public String nombre;

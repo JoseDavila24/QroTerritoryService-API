@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm \"D:/my workspace/QroTerritoryService-API/qro-territory-service/src/main/java/com/qroterritory/MyEntity.java\")",
+      "Bash(rm \"D:/my workspace/QroTerritoryService-API/qro-territory-service/src/main/java/com/qroterritory/GreetingResource.java\")"
+    ]
+  }
+}
